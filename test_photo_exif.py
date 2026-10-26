@@ -12,11 +12,75 @@ from photo_exif import (
     extract_metadata, extract_to_csv, find_images, main as extract_main, write_csv,
 )
 from photo_analytics import (
-    bucket_counts, focal_length_mm, main as analytics_main, read_csv, write_chart,
+    aperture_counts, bucket_counts, focus_distance_counts, focal_length_mm,
+    full_frame_bucket_counts, full_frame_focal_length_mm, iso_counts, lens_counts,
+    main as analytics_main, read_csv, write_all_charts, write_chart,
 )
 
 
 class PhotoExifTests(unittest.TestCase):
+    def test_additional_chart_metadata(self):
+        records = [
+            {"ExifIFD:FNumber": "2.8", "ExifIFD:ISO": "100", "ExifIFD:LensModel": "Sony 24-70mm",
+             "ExifIFD:SubjectDistance": "1", "ExifIFD:FocalLength": 20,
+             "ExifIFD:FocalLengthIn35mmFormat": 30},
+            {"Composite:Aperture": 4, "EXIF:ISO": 400, "Composite:LensID": "Sony 85mm",
+             "Sony:FocusDistance2": "5", "ExifIFD:FocalLength": 20, "Composite:ScaleFactor35efl": 1.5},
+            {"ExifIFD:FNumber": 2.8, "ExifIFD:ISO": 100, "ExifIFD:LensModel": " Sony   24-70mm ",
+             "ExifIFD:SubjectDistance": "inf", "Composite:FocalLength35efl": 50},
+            {"ExifIFD:FNumber": 0, "ExifIFD:ISO": "nan", "Composite:LensID": "123",
+             "ExifIFD:SubjectDistance": 0, "ExifIFD:FocalLength": 20},
+        ]
+        self.assertEqual(dict(aperture_counts(records)), {2.8: 2, 4: 1})
+        self.assertEqual(dict(iso_counts(records)), {100: 2, 400: 1})
+        self.assertEqual(dict(lens_counts(records)), {"Sony 24-70mm": 2, "Sony 85mm": 1})
+        self.assertEqual(dict(focus_distance_counts(records)), {"0.5-1 m": 1, "2-5 m": 1, "Infinity": 1})
+        self.assertEqual(dict(full_frame_bucket_counts(records)), {2: 2, 4: 1})
+        self.assertIsNone(full_frame_focal_length_mm(records[3]))
+
+    def test_focus_distance_boundaries_and_invalid_values(self):
+        values = [0.5, 1, 2, 5, 10, 20, 50, 51, "Infinity", -1, 0, "nan", True, "unknown"]
+        counts = focus_distance_counts([{"ExifIFD:SubjectDistance": value} for value in values])
+        self.assertEqual(sum(counts.values()), 9)
+        self.assertEqual(counts["0-0.5 m"], 1)
+        self.assertEqual(counts[">50 m"], 1)
+        self.assertEqual(counts["Infinity"], 1)
+
+    def test_image_discovery_excludes_default_chart_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            image = folder / "photo.ARW"
+            image.touch()
+            (folder / "output").mkdir()
+            (folder / "output" / "iso.png").touch()
+            with patch("pathlib.Path.cwd", return_value=folder):
+                self.assertEqual(find_images(folder, recursive=True), [image])
+
+    def test_all_charts_render_with_populated_metadata(self):
+        records = [{
+            "ExifIFD:FocalLength": 35, "ExifIFD:FocalLengthIn35mmFormat": 50,
+            "ExifIFD:FNumber": 2.8, "ExifIFD:ISO": 100,
+            "ExifIFD:LensModel": "Sony FE 24-70mm F2.8 GM II",
+            "ExifIFD:SubjectDistance": 2,
+        }, {
+            "ExifIFD:FocalLength": 85, "Composite:ScaleFactor35efl": 1,
+            "ExifIFD:FNumber": 4, "ExifIFD:ISO": 800,
+            "ExifIFD:LensModel": "Sony FE 85mm F1.8", "Sony:FocusDistance2": "inf",
+        }]
+        with tempfile.TemporaryDirectory() as temporary:
+            destinations = write_all_charts(records, Path(temporary))
+            for destination in destinations:
+                self.assertGreater(destination.stat().st_size, 1000)
+                self.assertEqual(destination.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_all_charts_render_with_missing_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for records in ([], [{"SourceFile": "photo.ARW"}]):
+                destinations = write_all_charts(records, Path(temporary))
+                self.assertEqual(len(destinations), 6)
+                for destination in destinations:
+                    self.assertEqual(destination.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
     @patch("photo_exif.shutil.which", return_value="exiftool")
     @patch("photo_exif.extract_metadata")
     def test_checkpoints_resume_after_interruption_without_duplicates(self, extract, which):
@@ -302,7 +366,8 @@ class PhotoExifTests(unittest.TestCase):
                 self.assertEqual(dict(bucket_counts(records)), {1: 1})
                 with patch("photo_exif.shutil.which", side_effect=AssertionError("No ExifTool needed")):
                     self.assertEqual(analytics_main([]), 0)
-                self.assertEqual((output / "focal_lengths.png").read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+                self.assertEqual((output / "output" / "focal_lengths.png").read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+                self.assertEqual(len(list((output / "output").glob("*.png"))), 6)
 
     @patch("builtins.print")
     @patch("photo_exif.shutil.which", return_value="exiftool")
@@ -316,11 +381,14 @@ class PhotoExifTests(unittest.TestCase):
             csv_path = folder / "reports" / "custom.csv"
             chart_path = folder / "charts" / "custom.png"
             self.assertEqual(extract_main([temporary, "--csv", str(csv_path)]), 0)
-            self.assertEqual(analytics_main([str(csv_path), "--chart", str(chart_path)]), 0)
+            self.assertEqual(analytics_main([
+                str(csv_path), "--chart", str(chart_path), "--output-dir", str(folder / "all-charts"),
+            ]), 0)
             self.assertTrue(chart_path.is_file())
+            self.assertEqual(len(list((folder / "all-charts").glob("*.png"))), 5)
             with patch("pathlib.Path.cwd", return_value=folder):
                 self.assertEqual(analytics_main([str(csv_path)]), 0)
-            self.assertTrue((folder / "focal_lengths.png").is_file())
+            self.assertTrue((folder / "output" / "focal_lengths.png").is_file())
 
     @patch("builtins.print")
     @patch("photo_exif.shutil.which", return_value="exiftool")

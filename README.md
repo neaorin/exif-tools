@@ -1,10 +1,10 @@
-# Photo EXIF export and focal-length chart
+# Photo EXIF Export and Usage Charts
 
 Two command-line Python tools for understanding your photography habits. Scan a
 folder of photos to export EXIF metadata, including camera, lens, focal length,
 exposure settings, and capture dates, into a CSV with one row per photo. Then
-turn that CSV into a focal-length distribution chart with 10 mm buckets and
-percentage labels to see which focal lengths you use most.
+turn that CSV into charts of focal lengths, apertures, ISO settings, lens models,
+focus distances, and 35 mm-equivalent focal lengths to understand how you shoot.
 
 Extraction supports subfolders, displays progress, and resumes from CSV
 checkpoints saved every 100 photos. Charting runs independently, so you can
@@ -29,15 +29,51 @@ availability depends on the file and what its camera or editing software saved.
 | TIFF | `.tif`, `.tiff` |
 | Other images | `.png`, `.heic`, `.heif`, `.avif`, `.webp` |
 
-Outputs are a UTF-8 CSV metadata report and a PNG chart.
+Outputs are a UTF-8 CSV metadata report and six PNG charts.
 
 ## Example Output
 
-This example uses **1,000 synthetic photos**, not real photo metadata. Each
-nonzero bucket shows its share of photos with valid focal lengths; the most-used
-bucket is highlighted in amber.
+These examples use **1,000 synthetic photos**, not real photo metadata. Each
+nonzero bucket shows its share of photos with valid metadata for that chart;
+the most-used bucket is highlighted in amber.
+
+### Focal Length
+
+Actual lens focal lengths grouped into 10 mm buckets.
 
 ![Example focal-length distribution chart using 1,000 synthetic photos](docs/example-focal-lengths.png)
+
+### Full-Frame Equivalent Focal Length
+
+The same synthetic focal lengths expressed as 35 mm equivalents, using explicit
+crop factors of 1.0 and 1.5 for the dummy cameras.
+
+![Example 35 mm-equivalent focal-length distribution using synthetic photos](docs/example-focal-lengths-35mm.png)
+
+### Aperture
+
+Recorded f-numbers show how frequently wide versus stopped-down apertures are used.
+
+![Example aperture distribution using synthetic photos](docs/example-apertures.png)
+
+### ISO
+
+Recorded ISO settings show the balance between low and high sensitivity.
+
+![Example ISO distribution using synthetic photos](docs/example-iso.png)
+
+### Lens Model
+
+Horizontal bars rank the synthetic lens models by photo count.
+
+![Example lens-model usage chart using synthetic photos](docs/example-lens-models.png)
+
+### Focus Distance
+
+Recorded subject distances are grouped into metre ranges, with a separate
+infinity category. Real photos may not contain this metadata.
+
+![Example focus-distance distribution using synthetic photos](docs/example-focus-distances.png)
 
 ## Setup and Usage
 
@@ -98,18 +134,37 @@ python photo_exif.py "D:\Photos" --exiftool "C:\Tools\exiftool.exe" --csv "D:\Re
 python photo_analytics.py "D:\Reports\photos.csv" --chart "D:\Reports\focal_lengths.png"
 ```
 
+To place all charts in a custom directory:
+
+```powershell
+python photo_analytics.py "D:\Reports\photos.csv" --output-dir "D:\Reports\charts"
+```
+
 `photo_exif.py` only creates `photo_metadata.csv`. `photo_analytics.py` reads
-`photo_metadata.csv` by default and creates `focal_lengths.png`. Both output
-defaults use the current working directory, not the photo folder, input CSV
-directory, or script directory. Relative paths also resolve from the current
-working directory. You can rerun analytics without extracting metadata again.
+`photo_metadata.csv` by default and creates these charts in `./output/`:
+
+| File | Contents |
+| --- | --- |
+| `focal_lengths.png` | Actual lens focal length in 10 mm buckets |
+| `focal_lengths_35mm.png` | Full-frame (35 mm-equivalent) focal length in 10 mm buckets |
+| `apertures.png` | Recorded f-numbers, rounded to one decimal place |
+| `iso.png` | Recorded ISO sensitivity values |
+| `lens_models.png` | Lens usage, ranked by number of photos |
+| `focus_distances.png` | Recorded focus distance in metre ranges, plus infinity |
+
+The default `output/` directory is ignored by Git. `--output-dir` changes the
+directory for all charts; the existing `--chart` option overrides only the actual
+focal-length chart's path. The metadata CSV still defaults to the current working
+directory. Neither output location depends on the photo folder, input CSV
+directory, or script directory. Relative paths resolve from the current working
+directory. You can rerun analytics without extracting metadata again.
 When running from another directory, use the full path to each Python script.
 
 Subfolders are scanned only with `--recursive`. Source photos are not modified.
 Output paths must end in `.csv` and `.png`, respectively. Existing output reports
-are replaced atomically after each extraction batch (the chart is replaced by
-analytics). Extraction excludes the default chart in the working directory
-when scanning that directory. Custom charts inside the photo tree are treated
+are replaced atomically after each extraction batch (charts are replaced by
+analytics). Extraction excludes the default `output/` directory and the legacy
+`./focal_lengths.png` chart. Custom charts inside the photo tree are treated
 as images; keep custom reports outside the scanned photo tree. Reserve the chart
 output filename for reports; do not point it at an existing photo you want to keep.
 
@@ -120,9 +175,12 @@ are exported without display units; structured values are JSON within a cell.
 The CSV uses UTF-8 with a BOM for Excel compatibility. Treat it as sensitive if
 photos contain location or identifying metadata.
 
-The chart uses a Seaborn white-grid style, larger labels, and highlights the
-most-used bucket(s) in amber. Nonzero buckets show their percentage of photos
-with valid focal lengths. The figure widens for larger focal-length ranges.
+Charts use a Seaborn white-grid style, larger labels, and highlight the most-used
+bucket(s) in amber. Nonzero buckets show their percentage of photos with valid
+metadata for that chart, excluding missing/invalid values. Each chart reports its
+own missing-data count and is still generated when no usable data is present.
+Lens models use horizontal bars with wrapped labels. Figures widen for larger
+numeric ranges.
 
 The chart counts actual lens focal length, not the 35 mm equivalent. Buckets are
 1-10, 11-20, 21-30 mm, etc., including zero-count buckets between focal lengths.
@@ -131,6 +189,21 @@ for example, 20.1 mm is counted in the bucket labeled 21-30. Missing, zero, or
 invalid focal lengths stay in the CSV but are excluded from counts and reported
 in the chart title. An empty-data chart is still produced when none are valid.
 Extraction errors are retained in CSV error columns where possible.
+
+The separate 35 mm-equivalent chart uses recorded `FocalLengthIn35mmFormat` or
+`FocalLength35efl`, falling back to actual focal length multiplied by an explicit
+`ScaleFactor35efl`. It never guesses crop factors from camera model names or
+assumes actual focal length is full-frame equivalent.
+
+Aperture uses `FNumber` or the composite `Aperture`; ISO uses recorded sensitivity.
+Lens names prefer `LensModel`, then textual `LensID` or `Lens`; numeric lens IDs
+are excluded because they are not model names. Focus distance uses
+`SubjectDistance`, `FocusDistance`, or Sony `FocusDistance2` in metres. Bins are
+(0, 0.5], (0.5, 1], (1, 2], (2, 5], (5, 10], (10, 20], (20, 50], >50 m, and
+infinity. Zero and unknown distances are excluded. Distance metadata is often
+absent or approximate, particularly in RAW files; the chart reflects reported
+values rather than measured subject distances. Older CSVs need no format change,
+but missing tags cannot be recovered without re-extraction.
 
 Tests:
 

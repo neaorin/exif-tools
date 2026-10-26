@@ -24,9 +24,11 @@ IMAGE_EXTENSIONS = {
 
 def find_images(folder: Path, recursive: bool = False) -> list[Path]:
     entries = folder.rglob("*") if recursive else folder.iterdir()
+    output_dir = (Path.cwd() / "output").resolve()
     return sorted(
         (path.resolve() for path in entries
-         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS),
+         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+         and not path.resolve().is_relative_to(output_dir)),
         key=lambda path: str(path).casefold(),
     )
 

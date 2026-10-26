@@ -1,5 +1,46 @@
 # Photo EXIF export and focal-length chart
 
+Two command-line Python tools for understanding your photography habits. Scan a
+folder of photos to export EXIF metadata, including camera, lens, focal length,
+exposure settings, and capture dates, into a CSV with one row per photo. Then
+turn that CSV into a focal-length distribution chart with 10 mm buckets and
+percentage labels to see which focal lengths you use most.
+
+Extraction supports subfolders, displays progress, and resumes from CSV
+checkpoints saved every 100 photos. Charting runs independently, so you can
+regenerate reports without rescanning your images. Source photos are never edited.
+
+## Supported Formats
+
+The extractor scans the following extensions (case-insensitive). Metadata
+availability depends on the file and what its camera or editing software saved.
+
+| Format | Extensions |
+| --- | --- |
+| Sony RAW | `.arw`, `.srf`, `.sr2` |
+| Adobe Digital Negative | `.dng` |
+| Canon RAW | `.cr2`, `.cr3` |
+| Nikon RAW | `.nef`, `.nrw` |
+| Fujifilm RAW | `.raf` |
+| Olympus RAW | `.orf` |
+| Panasonic RAW | `.rw2` |
+| Pentax RAW | `.pef` |
+| JPEG | `.jpg`, `.jpeg` |
+| TIFF | `.tif`, `.tiff` |
+| Other images | `.png`, `.heic`, `.heif`, `.avif`, `.webp` |
+
+Outputs are a UTF-8 CSV metadata report and a PNG chart.
+
+## Example Output
+
+This example uses **1,000 synthetic photos**, not real photo metadata. Each
+nonzero bucket shows its share of photos with valid focal lengths; the most-used
+bucket is highlighted in amber.
+
+![Example focal-length distribution chart using 1,000 synthetic photos](docs/example-focal-lengths.png)
+
+## Setup and Usage
+
 Requires Python 3.10+. Extraction uses [ExifTool](https://exiftool.org/), which
 supports Sony ARW and many other RAW formats without decoding the image pixels.
 Analytics uses Seaborn and Matplotlib and reads only the exported CSV; it does not require
